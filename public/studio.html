@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BiteNXT Studio Inbox</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --text: #1d2330; --muted: #6b7280; --line: #e3e6ea;
+    --accent: #0f6cbd; --accent-text: #fff; --mine: #e8f1fb; --theirs: #f1f2f4; --danger: #b42318;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b1f27; --text: #e7e9ee; --muted: #9aa3b2; --line: #2b313c;
+      --accent: #4a9be8; --accent-text: #0b1220; --mine: #1d3550; --theirs: #262b35; --danger: #f97066;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 6px 12px; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .6; cursor: default; }
+  input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+  .hidden { display: none !important; }
+  .muted { color: var(--muted); }
+  .error { color: var(--danger); min-height: 1.2em; }
+
+  #login { max-width: 340px; margin: 12vh auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; display: grid; gap: 10px; }
+  #login h1 { font-size: 18px; margin: 0 0 6px; }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  #app { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 53px); }
+  #list { border-right: 1px solid var(--line); overflow-y: auto; background: var(--panel); }
+  #filters { display: flex; gap: 6px; padding: 10px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  #filters input { flex: 1; min-width: 0; }
+  .thread { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; gap: 2px; }
+  .thread:hover, .thread.active { background: var(--theirs); }
+  .thread .row { display: flex; justify-content: space-between; gap: 8px; }
+  .thread .order { font-weight: 600; }
+  .badge { background: var(--accent); color: var(--accent-text); border-radius: 10px; padding: 0 7px; font-size: 12px; font-weight: 600; }
+  .tag { font-size: 12px; color: var(--muted); }
+
+  #detail { display: flex; flex-direction: column; min-width: 0; }
+  #empty { margin: auto; }
+  #thread-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  #thread-head .who { flex: 1; min-width: 200px; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 72%; padding: 8px 12px; border-radius: 10px; background: var(--theirs); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.studio { align-self: flex-end; background: var(--mine); }
+  .msg .meta { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .msg .files { display: grid; gap: 4px; margin-top: 6px; }
+  .msg .files button { text-align: left; padding: 4px 8px; font-size: 13px; }
+  #composer { border-top: 1px solid var(--line); padding: 10px 16px; background: var(--panel); display: grid; gap: 8px; }
+  #composer textarea { width: 100%; min-height: 64px; resize: vertical; }
+  #composer .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #composer .row .spacer { flex: 1; }
+
+  dialog { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); width: min(520px, calc(100vw - 32px)); padding: 18px; }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog h2 { font-size: 16px; margin: 0 0 10px; }
+  .member { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .member span:first-child { flex: 1; overflow-wrap: anywhere; }
+  #team-form { display: grid; gap: 8px; margin-top: 14px; }
+  #team-form .row { display: flex; gap: 8px; justify-content: flex-end; }
+
+  @media (max-width: 760px) {
+    #app { grid-template-columns: 1fr; }
+    #app.open #list { display: none; }
+    #app:not(.open) #detail { display: none; }
+    .msg { max-width: 90%; }
+  }
+</style>
+</head>
+<body>
+
+<form id="login" class="hidden">
+  <h1>BiteNXT Studio</h1>
+  <input id="email" type="email" placeholder="Email" autocomplete="username" required>
+  <input id="password" type="password" placeholder="Password" autocomplete="current-password" required>
+  <button class="primary" type="submit">Sign in</button>
+  <div id="login-error" class="error"></div>
+</form>
+
+<div id="shell" class="hidden">
+  <header>
+    <h1>Order messages</h1>
+    <span id="me" class="muted"></span>
+    <button id="team-btn" type="button" class="hidden">Team</button>
+    <button id="logout" type="button">Sign out</button>
+  </header>
+  <div id="app">
+    <aside id="list">
+      <div id="filters">
+        <input id="search" type="search" placeholder="Order or customer">
+        <select id="status">
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div id="threads"></div>
+    </aside>
+    <section id="detail">
+      <div id="empty" class="muted">Select an order to see its messages.</div>
+      <div id="thread-head" class="hidden">
+        <button id="back" type="button" title="Back to list">←</button>
+        <div class="who"><strong id="t-order"></strong> <span id="t-customer" class="muted"></span></div>
+        <label id="assign-wrap" class="hidden">Designer <select id="assign"></select></label>
+        <button id="toggle-status" type="button"></button>
+      </div>
+      <div id="messages" class="hidden"></div>
+      <form id="composer" class="hidden">
+        <textarea id="reply" placeholder="Reply to the customer…" maxlength="4000"></textarea>
+        <div class="row">
+          <input id="files" type="file" multiple>
+          <span class="spacer"></span>
+          <span id="send-error" class="error"></span>
+          <button id="send" class="primary" type="submit">Send</button>
+        </div>
+      </form>
+    </section>
+  </div>
+</div>
+
+<dialog id="team">
+  <h2>Studio team</h2>
+  <div id="members"></div>
+  <form id="team-form">
+    <strong>Add a person</strong>
+    <input id="m-name" placeholder="Name" required maxlength="100">
+    <input id="m-email" type="email" placeholder="Email" required>
+    <select id="m-role"><option value="designer">Designer (sees orders assigned to them)</option><option value="admin">Admin (sees all orders, assigns)</option></select>
+    <input id="m-password" type="text" placeholder="Temporary password (min 10 characters)" minlength="10" required autocomplete="off">
+    <div id="team-error" class="error"></div>
+    <div class="row"><button type="button" id="team-close">Close</button><button class="primary" type="submit">Add</button></div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const KEY = 'bnxStudioToken';
+  const store = {
+    get() { try { return sessionStorage.getItem(KEY) || ''; } catch { return ''; } },
+    set(v) { try { v ? sessionStorage.setItem(KEY, v) : sessionStorage.removeItem(KEY); } catch {} },
+  };
+  let token = store.get();
+  let me = null;
+  let threads = [];
+  let current = null;
+  let users = [];
+  let pollTimer = null;
+
+  async function api(path, opts = {}) {
+    const headers = { Authorization: 'Bearer ' + token };
+    let body = opts.body;
+    if (body && !(body instanceof FormData)) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(body); }
+    const res = await fetch('/studio/api' + path, { method: opts.method || 'GET', headers, body });
+    if (res.status === 401 && path !== '/login') { signOut(); throw new Error('Please sign in again.'); }
+    if (opts.raw) return res;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.message || 'Request failed (' + res.status + ').');
+    return data;
+  }
+
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const when = (ts) => new Date(ts * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const size = (b) => b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+
+  function showLogin() { $('shell').classList.add('hidden'); $('login').classList.remove('hidden'); $('email').focus(); }
+  function signOut() {
+    if (token) fetch('/studio/api/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }).catch(() => {});
+    token = ''; store.set(''); clearInterval(pollTimer); showLogin();
+  }
+
+  $('login').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('login-error').textContent = '';
+    try {
+      const res = await fetch('/studio/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: $('email').value, password: $('password').value }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || 'Sign-in failed.');
+      token = data.token; store.set(token); $('password').value = '';
+      start();
+    } catch (err) { $('login-error').textContent = err.message; }
+  });
+  $('logout').addEventListener('click', signOut);
+
+  async function start() {
+    try { me = (await api('/me')).user; } catch { return showLogin(); }
+    $('login').classList.add('hidden'); $('shell').classList.remove('hidden');
+    $('me').textContent = me.name + ' · ' + me.role;
+    if (me.role === 'admin') { $('team-btn').classList.remove('hidden'); try { users = (await api('/users')).users; } catch {} }
+    await loadThreads();
+    const fromHash = new URLSearchParams(location.hash.slice(1)).get('order');
+    if (fromHash) openThread(fromHash);
+    clearInterval(pollTimer);
+    pollTimer = setInterval(refresh, 15000);
+  }
+
+  async function refresh() {
+    if (document.hidden) return;
+    await loadThreads().catch(() => {});
+    if (current) await openThread(current, true).catch(() => {});
+  }
+
+  async function loadThreads() {
+    threads = (await api('/threads?status=' + encodeURIComponent($('status').value))).threads;
+    renderThreads();
+    const unread = threads.reduce((n, t) => n + t.unread, 0);
+    document.title = (unread ? '(' + unread + ') ' : '') + 'BiteNXT Studio Inbox';
+  }
+
+  function renderThreads() {
+    const q = $('search').value.trim().toLowerCase();
+    const box = $('threads');
+    box.replaceChildren();
+    const shown = threads.filter((t) => !q || (t.order_number + ' ' + t.customer_name + ' ' + t.customer_email).toLowerCase().includes(q));
+    if (!shown.length) box.append(el('div', 'thread muted', 'No conversations.'));
+    for (const t of shown) {
+      const item = el('div', 'thread' + (t.order_number === current ? ' active' : ''));
+      const top = el('div', 'row');
+      top.append(el('span', 'order', '#' + t.order_number));
+      if (t.unread) top.append(el('span', 'badge', String(t.unread)));
+      const mid = el('div', 'row');
+      mid.append(el('span', '', t.customer_name || t.customer_email), el('span', 'tag', when(t.last_message_at)));
+      const bottom = el('div', 'tag', [
+        t.status === 'closed' ? 'Closed' : (t.last_sender === 'customer' ? 'Awaiting reply' : 'Replied'),
+        t.assigned_name ? 'Designer: ' + t.assigned_name : (me.role === 'admin' ? 'Unassigned' : ''),
+      ].filter(Boolean).join(' · '));
+      item.append(top, mid, bottom);
+      item.addEventListener('click', () => openThread(t.order_number));
+      box.append(item);
+    }
+  }
+
+  async function openThread(order, quiet) {
+    const data = await api('/threads/' + encodeURIComponent(order)).catch((err) => { if (!quiet) alert(err.message); return null; });
+    if (!data) return;
+    const changed = current !== order;
+    current = order;
+    history.replaceState(null, '', '#order=' + encodeURIComponent(order));
+    $('app').classList.add('open');
+    for (const id of ['thread-head', 'messages', 'composer']) $(id).classList.remove('hidden');
+    $('empty').classList.add('hidden');
+
+    const t = data.thread;
+    $('t-order').textContent = 'Order #' + t.order_number;
+    $('t-customer').textContent = (t.customer_name ? t.customer_name + ' · ' : '') + t.customer_email;
+    $('toggle-status').textContent = t.status === 'closed' ? 'Reopen' : 'Mark done';
+    $('toggle-status').dataset.next = t.status === 'closed' ? 'open' : 'closed';
+    if (me.role === 'admin') {
+      $('assign-wrap').classList.remove('hidden');
+      const sel = $('assign');
+      sel.replaceChildren(new Option('Unassigned', ''));
+      for (const u of users) sel.append(new Option(u.name + (u.role === 'admin' ? ' (admin)' : ''), String(u.id)));
+      sel.value = t.assigned_to == null ? '' : String(t.assigned_to);
+    }
+
+    const box = $('messages');
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.replaceChildren();
+    for (const m of data.messages) {
+      const bubble = el('div', 'msg ' + m.from);
+      bubble.append(el('div', 'meta', (m.from === 'customer' ? m.name + ' (customer)' : m.name) + ' · ' + when(m.at)));
+      if (m.text) bubble.append(el('div', '', m.text));
+      if (m.attachments.length) {
+        const files = el('div', 'files');
+        for (const a of m.attachments) {
+          const b = el('button', '', '📎 ' + a.name + ' (' + size(a.size) + ')');
+          b.type = 'button';
+          b.addEventListener('click', () => download(a));
+          files.append(b);
+        }
+        bubble.append(files);
+      }
+      box.append(bubble);
+    }
+    if (changed || atBottom) box.scrollTop = box.scrollHeight;
+    if (!quiet || changed) loadThreads().catch(() => {});
+  }
+
+  async function download(a) {
+    try {
+      const res = await api('/attachments/' + a.id, { raw: true });
+      if (!res.ok) throw new Error('That file is not available.');
+      const url = URL.createObjectURL(await res.blob());
+      const link = el('a'); link.href = url; link.download = a.name; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (err) { alert(err.message); }
+  }
+
+  $('composer').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!current) return;
+    const form = new FormData();
+    form.append('text', $('reply').value);
+    for (const f of $('files').files) form.append('files[]', f);
+    $('send').disabled = true; $('send-error').textContent = '';
+    try {
+      await api('/threads/' + encodeURIComponent(current) + '/messages', { method: 'POST', body: form });
+      $('reply').value = ''; $('files').value = '';
+      await openThread(current, true);
+      $('messages').scrollTop = $('messages').scrollHeight;
+    } catch (err) { $('send-error').textContent = err.message; }
+    finally { $('send').disabled = false; }
+  });
+  $('reply').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('composer').requestSubmit(); });
+
+  $('toggle-status').addEventListener('click', async () => {
+    try { await api('/threads/' + encodeURIComponent(current) + '/status', { method: 'POST', body: { status: $('toggle-status').dataset.next } }); await openThread(current, true); await loadThreads(); }
+    catch (err) { alert(err.message); }
+  });
+  $('assign').addEventListener('change', async () => {
+    try { await api('/threads/' + encodeURIComponent(current) + '/assign', { method: 'POST', body: { user_id: $('assign').value ? Number($('assign').value) : null } }); await loadThreads(); }
+    catch (err) { alert(err.message); }
+  });
+  $('status').addEventListener('change', () => loadThreads().catch(() => {}));
+  $('search').addEventListener('input', renderThreads);
+  $('back').addEventListener('click', () => { $('app').classList.remove('open'); current = null; history.replaceState(null, '', location.pathname); renderThreads(); });
+
+  function renderTeam() {
+    const box = $('members');
+    box.replaceChildren();
+    for (const u of users) {
+      const row = el('div', 'member');
+      row.append(el('span', '', u.name + ' · ' + u.email), el('span', 'tag', u.role));
+      if (u.id !== me.id) {
+        const b = el('button', '', 'Deactivate'); b.type = 'button';
+        b.addEventListener('click', async () => {
+          if (!confirm('Deactivate ' + u.name + '? They will be signed out and lose access.')) return;
+          try { users = (await api('/users/' + u.id + '/deactivate', { method: 'POST' })).users; renderTeam(); }
+          catch (err) { $('team-error').textContent = err.message; }
+        });
+        row.append(b);
+      }
+      box.append(row);
+    }
+  }
+  $('team-btn').addEventListener('click', () => { $('team-error').textContent = ''; renderTeam(); $('team').showModal(); });
+  $('team-close').addEventListener('click', () => $('team').close());
+  $('team-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('team-error').textContent = '';
+    try {
+      users = (await api('/users', { method: 'POST', body: { name: $('m-name').value, email: $('m-email').value, role: $('m-role').value, password: $('m-password').value } })).users;
+      $('team-form').reset(); renderTeam();
+    } catch (err) { $('team-error').textContent = err.message; }
+  });
+
+  token ? start() : showLogin();
+})();
+</script>
+</body>
+</html>

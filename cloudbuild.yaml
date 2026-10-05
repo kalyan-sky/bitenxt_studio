@@ -1,0 +1,81 @@
+# Cloud Build pipeline: test → build image → push to Artifact Registry → deploy to Cloud Run.
+# Same setup as the support chatbot: use it from a Cloud Build trigger on pushes to `main`
+# (see docs/DEPLOY.md). Change the defaults below in the trigger's "Substitution variables".
+#
+# The deploy step sets the image, service account, DB password secret, attachment bucket
+# mount and sizing. Environment variables (Magento URL, DATABASE_DSN, allowed origins, ...)
+# are managed in the Cloud Run console and are kept on every deploy.
+
+substitutions:
+  _REGION: asia-south1                      # Cloud Run + Artifact Registry region
+  _SERVICE: bitenxt-studio                  # Cloud Run service name
+  _AR_REPO: bitenxt                         # Artifact Registry Docker repository (shared with the chatbot)
+  _RUNTIME_SA: bitenxt-studio               # service account the service runs as (name only)
+  _BUCKET: CHANGE-ME-studio-attachments     # Cloud Storage bucket for attachments
+  _CLOUDSQL_INSTANCE: ''                    # PROJECT:REGION:INSTANCE when using Cloud SQL, else empty
+  _SECRETS: DATABASE_PASSWORD=studio-db-password:latest
+
+steps:
+  # 1. Unit tests: a failing test stops the pipeline before anything is deployed.
+  - id: test
+    name: composer:2
+    entrypoint: sh
+    args:
+      - -c
+      - composer install --no-interaction --no-progress --prefer-dist && vendor/bin/phpunit
+
+  # 2. Build the image.
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest
+      - .
+
+  # 3. Push both tags.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: [push, --all-tags, '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}']
+
+  # 4. Deploy a new revision. Creates the service on the first run.
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        SQL_FLAG=()
+        if [ -n "${_CLOUDSQL_INSTANCE}" ]; then SQL_FLAG=(--set-cloudsql-instances="${_CLOUDSQL_INSTANCE}"); fi
+        gcloud run deploy ${_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID \
+          --region=${_REGION} \
+          --service-account=${_RUNTIME_SA}@$PROJECT_ID.iam.gserviceaccount.com \
+          --update-secrets=${_SECRETS} \
+          --execution-environment=gen2 \
+          --clear-volumes --clear-volume-mounts \
+          --add-volume=name=attachments,type=cloud-storage,bucket=${_BUCKET} \
+          --add-volume-mount=volume=attachments,mount-path=/mnt/studio \
+          "$${SQL_FLAG[@]}" \
+          --allow-unauthenticated \
+          --port=8080 \
+          --cpu=1 \
+          --memory=1Gi \
+          --concurrency=20 \
+          --timeout=300 \
+          --min-instances=0 \
+          --cpu-boost \
+          --max-instances=5 \
+          --quiet
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:$BUILD_ID
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/${_SERVICE}:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 1200s
